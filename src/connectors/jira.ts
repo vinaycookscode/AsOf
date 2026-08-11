@@ -1,4 +1,4 @@
-import { mapLimit, withRetry } from "./http.js";
+import { HttpError, mapLimit, withRetry } from "./http.js";
 import type { Issue, IssueTransition, Person, Sprint, StatusCategory } from "./types.js";
 import { stableId } from "./types.js";
 
@@ -41,10 +41,10 @@ interface JiraIssue {
 }
 
 interface JiraSearchResponse {
-  startAt: number;
-  maxResults: number;
-  total: number;
   issues: JiraIssue[];
+  /** /rest/api/3/search/jql is cursor-paginated (no more startAt/total) — page until isLast or a missing token. */
+  nextPageToken?: string;
+  isLast?: boolean;
 }
 
 interface JiraBoard {
@@ -63,7 +63,13 @@ interface JiraSprint {
 const PAGE_SIZE = 100;
 
 export class JiraClient {
-  constructor(private readonly config: JiraConfig) {}
+  private readonly config: JiraConfig;
+
+  constructor(config: JiraConfig) {
+    // Tolerate a trailing slash in JIRA_BASE_URL (e.g. "https://x.atlassian.net/") — otherwise
+    // every request path doubles it up ("https://x.atlassian.net//rest/...").
+    this.config = { ...config, baseUrl: config.baseUrl.replace(/\/+$/, "") };
+  }
 
   private headers(): Record<string, string> {
     const basic = Buffer.from(`${this.config.email}:${this.config.apiToken}`).toString("base64");
@@ -80,19 +86,23 @@ export class JiraClient {
   }
 
   /** Paginated issue pull with changelog (transitions) expanded, per README FR-2 / B3. */
+  /** Uses /rest/api/3/search/jql (the pre-2026 /rest/api/3/search GET endpoint was removed —
+   *  see https://developer.atlassian.com/changelog/#CHANGE-2046). Cursor-paginated: keep
+   *  requesting nextPageToken until the API says isLast (or stops returning one). */
   async fetchIssues(): Promise<JiraIssue[]> {
     const all: JiraIssue[] = [];
-    let startAt = 0;
+    let nextPageToken: string | undefined;
 
     for (;;) {
       const jql = encodeURIComponent(`project = ${this.config.projectKey} ORDER BY updated DESC`);
       const fields = encodeURIComponent("summary,status,assignee,issuetype,updated,customfield_10016");
-      const path = `/rest/api/3/search?jql=${jql}&startAt=${startAt}&maxResults=${PAGE_SIZE}&expand=changelog&fields=${fields}`;
+      const tokenParam = nextPageToken ? `&nextPageToken=${encodeURIComponent(nextPageToken)}` : "";
+      const path = `/rest/api/3/search/jql?jql=${jql}&maxResults=${PAGE_SIZE}&expand=changelog&fields=${fields}${tokenParam}`;
       const page = await this.getJson<JiraSearchResponse>(path);
       all.push(...page.issues);
 
-      if (startAt + page.issues.length >= page.total || page.issues.length === 0) break;
-      startAt += page.issues.length;
+      if (page.isLast || !page.nextPageToken || page.issues.length === 0) break;
+      nextPageToken = page.nextPageToken;
     }
 
     return all;
@@ -104,9 +114,16 @@ export class JiraClient {
     );
     if (boards.values.length === 0) return null;
 
-    const sprints = await mapLimit(boards.values, 3, (board) =>
-      this.getJson<{ values: JiraSprint[] }>(`/rest/agile/1.0/board/${board.id}/sprint?state=active`),
-    );
+    const sprints = await mapLimit(boards.values, 3, async (board) => {
+      try {
+        return await this.getJson<{ values: JiraSprint[] }>(`/rest/agile/1.0/board/${board.id}/sprint?state=active`);
+      } catch (err) {
+        // Kanban boards ("team-managed" projects default to this) 400 with "The board does not
+        // support sprints" — a legitimate real-world case, not a failure. Any other status is.
+        if (err instanceof HttpError && err.status === 400) return { values: [] };
+        throw err;
+      }
+    });
     const active = sprints.flatMap((s) => s.values).find((s) => s.state === "active");
     return active ?? null;
   }
