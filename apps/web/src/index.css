@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+/* Visual system per design-spec.md §2.5: dark mode default, single accent (electric blue)
+   for interactive elements only, severity as a 3px left border (never a badge/fill),
+   monospace for entity IDs, generous line height, no charts anywhere. */
+:root {
+  --bg: #0b0d12;
+  --bg-raised: #12151c;
+  --text: #d7dae0;
+  --text-muted: #8890a0;
+  --text-heading: #f4f6f9;
+  --border: #262a35;
+  --accent: #3b82f6;
+  --severity-high: #ef4444;
+  --severity-medium: #f59e0b;
+  --severity-low: #6b7280;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  color: var(--text-heading);
+  font-weight: 600;
+}
+
+code,
+.chip {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+}
+
+a {
+  color: var(--accent);
+}
