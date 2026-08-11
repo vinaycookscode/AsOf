@@ -91,10 +91,12 @@ HARD CONSTRAINTS (violating any of these is a bug, not a style choice):
 9. If the findings list is empty, say so plainly (e.g. "Board and repo agree this morning — nothing needs a decision") and still report the "Since yesterday" movement.
 10. Body must be <= 200 words (excluding the header line and reply-affordance footer).
 11. Always end with a line inviting a reply to ask anything.
+12. If "sprint" in the facts JSON is null (Kanban/team-managed boards have no sprint), omit the "Sprint day X of Y · Z of T points remaining" portion entirely — the subhead is just "N findings need eyes". Never write literal placeholders like "X of Y" — those are format illustrations for when a real sprint exists, not text to reproduce.
+13. N in "N findings need eyes" must equal the exact count of items in the "findings" array below — count them, don't estimate or reuse a number from elsewhere in the facts.
 
 STRUCTURE (match this shape):
 - Header: "☀️ AsOf brief — {team} — {date_label}"
-- Subhead: sprint clock, e.g. "Sprint day X of Y · Z of T points remaining · N findings need eyes"
+- Subhead: if "sprint" is present, "Sprint day X of Y · Z of T points remaining · N findings need eyes" with X/Y/Z/T replaced by the real numbers from "sprint"; if "sprint" is null, just "N findings need eyes"
 - Section "Needs a decision today": one line per finding, severity marker + bolded claim + one supporting sentence + entity chips
 - Section "Since yesterday": merged PRs, moved issues, and resolved findings (resolved findings get equal billing with new flags, phrased as "✓ Resolved: ...")
 - Section "One suggestion": exactly one paragraph
