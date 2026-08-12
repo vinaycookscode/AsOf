@@ -61,6 +61,10 @@ export function requireGithubConfig(): { token: string; owner: string; repos: st
   return { token, owner, repos };
 }
 
+export function isAnthropicConfigured(): boolean {
+  return Boolean(env.anthropic.apiKey);
+}
+
 export function requireAnthropicConfig(): { apiKey: string; model: string } {
   const { apiKey, model } = env.anthropic;
   if (!apiKey) {

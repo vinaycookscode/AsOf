@@ -1,10 +1,10 @@
-import { requireGithubConfig, requireJiraConfig } from "../config/env.js";
+import { isAnthropicConfigured, requireAnthropicConfig, requireGithubConfig, requireJiraConfig } from "../config/env.js";
 import { GithubClient } from "../connectors/github.js";
 import { JiraClient } from "../connectors/jira.js";
 import type { Commit, Person, PullRequest } from "../connectors/types.js";
 import { pool } from "../db/pool.js";
 import { getOrCreateTeam, syncTeamState, type SyncBundle } from "../db/repository.js";
-import { resolveLinks } from "../linking/index.js";
+import { createHaikuLinker, resolveLinksWithFuzzy } from "../linking/index.js";
 import { isLiveMode, resolveNow, resolveTeamName } from "./context.js";
 import { buildDemoBundle, DEMO_PROJECT_KEYS, DEMO_TEAM_NAME } from "../../test/fixtures/demoTeam.js";
 
@@ -59,7 +59,10 @@ async function main(): Promise<void> {
     projectKeys = DEMO_PROJECT_KEYS;
   }
 
-  const links = resolveLinks(base.pullRequests, base.commits, base.issues, projectKeys);
+  // Fuzzy linking (B19) only when an Anthropic key is set — otherwise every unlinked PR would
+  // silently no-op it, which is fine, but staying opt-in keeps `npm run sync` free by default.
+  const linker = isAnthropicConfigured() ? createHaikuLinker(requireAnthropicConfig().apiKey) : undefined;
+  const links = await resolveLinksWithFuzzy(base.pullRequests, base.commits, base.issues, projectKeys, linker);
   const bundle: SyncBundle = { ...base, links };
 
   const { teamId } = await getOrCreateTeam(teamName);
@@ -69,7 +72,8 @@ async function main(): Promise<void> {
     `Synced: ${bundle.issues.length} issues, ${bundle.pullRequests.length} PRs, ${bundle.commits.length} commits, ` +
       `${bundle.links.length} links (${bundle.links.filter((l) => l.linkSource === "explicit").length} explicit, ` +
       `${bundle.links.filter((l) => l.linkSource === "branch_name").length} branch_name, ` +
-      `${bundle.links.filter((l) => l.linkSource === "commit_ref").length} commit_ref), ${bundle.people.length} people.`,
+      `${bundle.links.filter((l) => l.linkSource === "commit_ref").length} commit_ref, ` +
+      `${bundle.links.filter((l) => l.linkSource === "fuzzy").length} fuzzy), ${bundle.people.length} people.`,
   );
 }
 

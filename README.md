@@ -28,6 +28,7 @@ Detects **drift** between what your Jira board claims and what your GitHub repos
 | B25 | Auto-resolve pass + finding lifecycle (open ↔ corrected) | done — verified live (see caveats below); ignored/snoozed are B35 |
 | B35 | Correct/ignore/snooze feedback actions + suppression store | done — verified live (see caveats below) |
 | B36 | 32+ rule fixtures (TP/boundary/FP-trap/resolution) in CI | done — 35 fixtures across D1–D8, `.github/workflows/ci.yml` runs `npm test` |
+| B19 | Fuzzy PR↔ticket matching via Haiku | done — opt-in, runs only when `ANTHROPIC_API_KEY` is set |
 
 ## Setup
 
@@ -216,6 +217,21 @@ finding *count* in the subhead wrong (e.g. reported 5 when there were 4) even af
 noted in the Jarvis caveats below. Not pursued further since Ollama is the dev/demo fallback,
 not the production path (`ANTHROPIC_API_KEY` is); the entity-hallucination guard (invariant #2),
 which is the invariant that actually matters, was never violated.
+
+### Fuzzy linking (B19)
+
+Last-resort linking pass for PRs no rule-based source (explicit/branch_name/commit_ref) matched
+— `src/linking/fuzzy.ts`. Haiku is shown the PR's title/body plus the connected project's issue
+titles and asked whether one plausibly matches on subject matter, discarding anything below 0.5
+confidence and any key it doesn't actually recognize from the offered list (a hallucination
+guard, same spirit as the brief narrator's entity guard). Always `linkSource: "fuzzy"` —
+drift-rules-spec.md §0 already has D1/D2/D6 exclude fuzzy links from their linking gate
+regardless of confidence, so a wrong guess here can never itself drive a High-severity finding.
+
+Opt-in: `resolveLinksWithFuzzy` (used by `npm run sync`) only calls Haiku when
+`ANTHROPIC_API_KEY` is set, and only for PRs nothing else already linked — `npm run sync` stays
+free and synchronous-fast by default. 9 fixture tests against a mocked `FuzzyLinkerClient`, no
+live API calls in CI.
 
 ## Design invariants
 
