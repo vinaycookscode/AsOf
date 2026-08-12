@@ -77,3 +77,11 @@ export interface StandupResponse {
   now: string;
   people: PersonState[];
 }
+
+export interface AskResponse {
+  answer: string;
+  toolCallsUsed: string[];
+  /** entity mention (e.g. "NOVA-142", "PR #91") -> evidence source URL, for inline chips. */
+  sources: Record<string, string>;
+  error?: string;
+}

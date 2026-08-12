@@ -8,6 +8,41 @@ const MAX_TOOL_ITERATIONS = 4;
 export interface AskResult {
   answer: string;
   toolCallsUsed: string[];
+  /** entity mention (e.g. "NOVA-142", "PR #91") -> evidence source URL, for clickable chips (B33). */
+  sources: Record<string, string>;
+}
+
+/**
+ * Walks a tool result tree collecting entity->sourceUrl pairs, so the Ask screen can render
+ * clickable source chips inline (design principle 1: evidence or it didn't happen) instead of
+ * plain text. Recognizes two shapes already used across the query service: Finding-like
+ * (entityRefs + evidence, matched by label substring — same pattern FindingCard.tsx uses for its
+ * chips) and label+sourceUrl-like (PersonStateItem, merged PRs).
+ */
+function collectSources(value: unknown, sources: Map<string, string>): void {
+  if (Array.isArray(value)) {
+    for (const v of value) collectSources(v, sources);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  const obj = value as Record<string, unknown>;
+
+  if (Array.isArray(obj.entityRefs) && Array.isArray(obj.evidence)) {
+    for (const ref of obj.entityRefs as Record<string, unknown>[]) {
+      const label = typeof ref.issueKey === "string" ? ref.issueKey : typeof ref.prNumber === "number" ? `PR #${ref.prNumber}` : undefined;
+      if (!label) continue;
+      const evidence = (obj.evidence as { label?: unknown; sourceUrl?: unknown }[]).find(
+        (e) => typeof e.label === "string" && e.label.includes(label),
+      );
+      if (typeof evidence?.sourceUrl === "string") sources.set(label, evidence.sourceUrl);
+    }
+  }
+
+  if (typeof obj.label === "string" && typeof obj.sourceUrl === "string") {
+    for (const mention of findEntityMentions(obj.label)) sources.set(mention, obj.sourceUrl);
+  }
+
+  for (const v of Object.values(obj)) collectSources(v, sources);
 }
 
 function buildAskSystemPrompt(): string {
@@ -40,6 +75,7 @@ async function askQuestionClaude(
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: question }];
   const allowedEntities = new Set<string>();
   const toolCallsUsed: string[] = [];
+  const sources = new Map<string, string>();
 
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
     const response = await client.messages.create({
@@ -62,7 +98,7 @@ async function askQuestionClaude(
       if (violations.length > 0) {
         throw new Error(`Ask (Claude) introduced entities absent from tool results: ${violations.join(", ")}`);
       }
-      return { answer: text, toolCallsUsed };
+      return { answer: text, toolCallsUsed, sources: Object.fromEntries(sources) };
     }
 
     messages.push({ role: "assistant", content: response.content });
@@ -71,6 +107,7 @@ async function askQuestionClaude(
       toolCallsUsed.push(tu.name);
       const result = await executeTool(tu.name, (tu.input as Record<string, unknown>) ?? {}, teamId, now);
       for (const m of findEntityMentions(JSON.stringify(result))) allowedEntities.add(m);
+      collectSources(result, sources);
       toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(result) });
     }
     messages.push({ role: "user", content: toolResults });
@@ -110,6 +147,7 @@ async function askQuestionOllama(
   ];
   const allowedEntities = new Set<string>();
   const toolCallsUsed: string[] = [];
+  const sources = new Map<string, string>();
 
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
     const response = await withRetry(
@@ -131,7 +169,7 @@ async function askQuestionOllama(
       if (violations.length > 0) {
         throw new Error(`Ask (Ollama) introduced entities absent from tool results: ${violations.join(", ")}`);
       }
-      return { answer: text, toolCallsUsed };
+      return { answer: text, toolCallsUsed, sources: Object.fromEntries(sources) };
     }
 
     messages.push(response.message);
@@ -139,6 +177,7 @@ async function askQuestionOllama(
       toolCallsUsed.push(call.function.name);
       const result = await executeTool(call.function.name, call.function.arguments ?? {}, teamId, now);
       for (const m of findEntityMentions(JSON.stringify(result))) allowedEntities.add(m);
+      collectSources(result, sources);
       messages.push({ role: "tool", content: JSON.stringify(result) });
     }
   }

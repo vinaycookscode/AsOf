@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { Today } from "./pages/Today";
 import { Standup } from "./pages/Standup";
+import { Ask } from "./pages/Ask";
 import { Jarvis } from "./pages/Jarvis";
 
 const SCREENS = {
   Today: Today,
   Standup: Standup,
+  Ask: Ask,
   Jarvis: Jarvis,
 } as const;
 type Screen = keyof typeof SCREENS;

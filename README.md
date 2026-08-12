@@ -30,6 +30,7 @@ Detects **drift** between what your Jira board claims and what your GitHub repos
 | B36 | 32+ rule fixtures (TP/boundary/FP-trap/resolution) in CI | done — 35 fixtures across D1–D8, `.github/workflows/ci.yml` runs `npm test` |
 | B19 | Fuzzy PR↔ticket matching via Haiku | done — opt-in, runs only when `ANTHROPIC_API_KEY` is set |
 | B26 | Per-team rule config API + workflow status mapping | done — verified live (see caveats below) |
+| B33 | Ask screen (chat, source chips, suggested prompts) | done — verified live against real KAN team data (see caveats below) |
 
 ## Setup
 
@@ -106,8 +107,8 @@ UI by design; only the spoken answer appears, briefly, once ready.
   `continuous` mode needs after Chrome's periodic internal stop/restart cycles. Looked exactly
   like "the mic just stops working after a while." Fixed by explicitly resetting the ref on
   every mount rather than trusting its default.
-- This is voice-first Q&A, not the full FR-4 spec (SSE streaming + inline source chips) — that
-  remains a text-based "Ask" screen for later.
+- This is voice-first Q&A, not the full FR-4 spec (SSE streaming). The text-based Ask screen
+  (B33, below) now exists with source chips — streaming itself is still not implemented in either.
 
 ### Drift rules D4–D8
 
@@ -256,6 +257,33 @@ drift → its 3 open findings correctly flipped to `corrected` (not silently del
 `d2.params.days` to 10 → confirmed the same real data no longer triggers it at the new threshold
 → reset to defaults → the original 4 findings reopened in place rather than duplicating.
 
+### Ask screen (B33)
+
+Text-based chat over the same `/api/ask` backend Jarvis uses — a Send button plus Enter-to-submit,
+three suggested prompts in the empty state (design-spec.md §2.4: "empty state shows the prompts,
+not a blank box"), and inline source chips.
+
+Chips needed the backend to change: `/api/ask` previously returned only prose. Extended
+`AskResult` with a `sources: Record<entityMention, sourceUrl>` map, built by
+`collectSources()` in `src/llm/ask.ts` walking each tool call's result for two already-existing
+shapes — Finding-like (`entityRefs` + `evidence`, matched by label substring, same pattern
+`FindingCard.tsx` already uses for its own chips) and `{label, sourceUrl}`-like (person-state
+items). The frontend (`apps/web/src/pages/Ask.tsx`) splits assistant prose on the same entity
+regex `groundingGuard.ts` uses and renders each mention as a `Chip` — clickable when a source
+URL was collected, plain text otherwise, never inventing a link.
+
+**Not implemented: SSE token streaming.** The design spec calls for "streaming chat"; this reuses
+the existing single-shot request/response `/api/ask` (same gap already documented for Jarvis).
+Real streaming would mean reworking the tool-use loop in `ask.ts` to forward partial deltas for
+both providers (Anthropic and Ollama) while interleaving tool calls — a substantially bigger
+change than the rest of B33, deferred rather than done partially.
+
+Verified live against the real KAN team, not a fixture: asked "What findings need my attention?"
+— the local model guessed a wrong tool (`get_person_state("you")`) and the UI correctly rendered
+the tool's honest "no team member found" error rather than fabricating an answer. Asked "List the
+current drift findings" — got back all 4 real findings with `KAN-16`, `PR #2`, `KAN-15`, etc. all
+rendered as clickable chips linking to the actual Jira/GitHub URLs, multi-turn history intact.
+
 ## Design invariants
 
 These are enforced, not aspirational:
@@ -279,6 +307,6 @@ src/rules/      D1-D8 + rule runner          (all 8 done — D4-D8 are B20-B24)
 src/llm/        brief narrator + chat Q&A     (Claude + Ollama fallback — B13, B28)
 src/cli/        prototype entrypoints        (sync, drift, brief)
 src/api/        Fastify query service        (/api/today, /api/standup, /api/ask — B27, B28)
-apps/web/       React/Vite/Tailwind frontend (Today, Standup, Jarvis — B31/B32/B28; Settings is P4)
+apps/web/       React/Vite/Tailwind frontend (Today, Standup, Ask, Jarvis — B31/B32/B33/B28; Settings is B34, not started)
 test/fixtures/  fake Jira/GitHub payloads + demoTeam.ts (credential-free pipeline demo)
 ```

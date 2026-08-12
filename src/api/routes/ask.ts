@@ -36,7 +36,7 @@ export async function askRoutes(app: FastifyInstance): Promise<void> {
 
     try {
       const result = await askQuestion(question, teamId, now, provider);
-      return { answer: result.answer, toolCallsUsed: result.toolCallsUsed };
+      return { answer: result.answer, toolCallsUsed: result.toolCallsUsed, sources: result.sources };
     } catch (err) {
       request.log.error(err);
       reply.code(502);
