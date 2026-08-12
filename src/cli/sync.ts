@@ -1,18 +1,19 @@
 import { isAnthropicConfigured, requireAnthropicConfig, requireGithubConfig, requireJiraConfig } from "../config/env.js";
 import { GithubClient } from "../connectors/github.js";
 import { JiraClient } from "../connectors/jira.js";
-import type { Commit, Person, PullRequest } from "../connectors/types.js";
+import type { Commit, Person, PullRequest, StatusCategory } from "../connectors/types.js";
 import { pool } from "../db/pool.js";
 import { getOrCreateTeam, syncTeamState, type SyncBundle } from "../db/repository.js";
+import { getStatusCategoryMap } from "../db/ruleConfig.js";
 import { createHaikuLinker, resolveLinksWithFuzzy } from "../linking/index.js";
 import { isLiveMode, resolveNow, resolveTeamName } from "./context.js";
 import { buildDemoBundle, DEMO_PROJECT_KEYS, DEMO_TEAM_NAME } from "../../test/fixtures/demoTeam.js";
 
-async function syncLive(): Promise<{ bundle: Omit<SyncBundle, "links">; projectKeys: string[] }> {
+async function syncLive(statusCategoryMap: Record<string, StatusCategory>): Promise<{ bundle: Omit<SyncBundle, "links">; projectKeys: string[] }> {
   const jiraConfig = requireJiraConfig();
   const githubConfig = requireGithubConfig();
 
-  const jira = new JiraClient(jiraConfig);
+  const jira = new JiraClient({ ...jiraConfig, statusCategoryMap });
   const [rawIssues, rawSprint] = await Promise.all([jira.fetchIssues(), jira.fetchActiveSprint()]);
   const { issues, people: jiraPeople, sprint } = jira.normalize(rawIssues, rawSprint);
 
@@ -39,13 +40,15 @@ async function syncLive(): Promise<{ bundle: Omit<SyncBundle, "links">; projectK
 async function main(): Promise<void> {
   const live = isLiveMode();
   const teamName = resolveTeamName(DEMO_TEAM_NAME);
+  const { teamId } = await getOrCreateTeam(teamName);
 
   let base: Omit<SyncBundle, "links">;
   let projectKeys: string[];
 
   if (live) {
     console.log(`Live mode: pulling from Jira + GitHub for team "${teamName}"...`);
-    const result = await syncLive();
+    const statusCategoryMap = await getStatusCategoryMap(teamId);
+    const result = await syncLive(statusCategoryMap);
     base = result.bundle;
     projectKeys = result.projectKeys;
   } else {
@@ -65,7 +68,6 @@ async function main(): Promise<void> {
   const links = await resolveLinksWithFuzzy(base.pullRequests, base.commits, base.issues, projectKeys, linker);
   const bundle: SyncBundle = { ...base, links };
 
-  const { teamId } = await getOrCreateTeam(teamName);
   await syncTeamState(teamId, bundle);
 
   console.log(

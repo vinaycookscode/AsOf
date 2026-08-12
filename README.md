@@ -29,6 +29,7 @@ Detects **drift** between what your Jira board claims and what your GitHub repos
 | B35 | Correct/ignore/snooze feedback actions + suppression store | done — verified live (see caveats below) |
 | B36 | 32+ rule fixtures (TP/boundary/FP-trap/resolution) in CI | done — 35 fixtures across D1–D8, `.github/workflows/ci.yml` runs `npm test` |
 | B19 | Fuzzy PR↔ticket matching via Haiku | done — opt-in, runs only when `ANTHROPIC_API_KEY` is set |
+| B26 | Per-team rule config API + workflow status mapping | done — verified live (see caveats below) |
 
 ## Setup
 
@@ -232,6 +233,28 @@ Opt-in: `resolveLinksWithFuzzy` (used by `npm run sync`) only calls Haiku when
 `ANTHROPIC_API_KEY` is set, and only for PRs nothing else already linked — `npm run sync` stays
 free and synchronous-fast by default. 9 fixture tests against a mocked `FuzzyLinkerClient`, no
 live API calls in CI.
+
+### Per-team rule config (B26)
+
+`rule_config` (already in the schema, unused until now) is finally wired up. `GET/PUT
+/api/settings/rules/:ruleId` reads/writes per-team `enabled`, threshold `params`, and
+`slackDelivery`, merged onto the drift-rules-spec.md defaults — a team with no row yet for a
+rule just gets that rule's spec default. `cli/drift.ts` now loads this per-team config instead
+of the hardcoded `DEFAULT_RULE_CONFIG`, and filters out findings from disabled rules *before*
+persisting — which means disabling a rule also auto-resolves any of its findings that were
+already open, for free, via the existing open→corrected lifecycle (B25).
+
+Also added: `team.status_category_map` (migration 003) and `GET/PUT /api/settings/status-map`,
+persisting the workflow-mapping step design-spec.md §2.1 describes ("drag your statuses into
+Done-ish/In-Progress-ish/Blocked-ish buckets"). `cli/sync.ts` now loads it before constructing
+`JiraClient`, closing the loop on a constructor param (`statusCategoryMap`) that existed since B3
+but was never actually persisted or fed by anything. No onboarding UI writes to it yet (that's
+B15/B34) — it's a real, working API a Settings screen can call once built.
+
+Verified live against the real KAN team, not just fixtures: disabled D2 via the API → reran
+drift → its 3 open findings correctly flipped to `corrected` (not silently deleted) → raised
+`d2.params.days` to 10 → confirmed the same real data no longer triggers it at the new threshold
+→ reset to defaults → the original 4 findings reopened in place rather than duplicating.
 
 ## Design invariants
 

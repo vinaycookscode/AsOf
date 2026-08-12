@@ -1,8 +1,8 @@
-import { DEFAULT_RULE_CONFIG } from "../rules/types.js";
 import { ALL_RULES, runRules } from "../rules/index.js";
 import { pool } from "../db/pool.js";
 import { getOrCreateTeam, loadTeamState } from "../db/repository.js";
 import { getRankedOpenFindings, persistFindings } from "../db/findings.js";
+import { buildRuleConfig } from "../db/ruleConfig.js";
 import { resolveNow, resolveTeamName } from "./context.js";
 import { DEMO_TEAM_NAME } from "../../test/fixtures/demoTeam.js";
 
@@ -12,7 +12,8 @@ async function main(): Promise<void> {
 
   const state = await loadTeamState(teamId);
   const now = resolveNow();
-  const ruleOutput = runRules(ALL_RULES, state, { now, ...DEFAULT_RULE_CONFIG });
+  const { config, enabledRuleIds } = await buildRuleConfig(teamId, now);
+  const ruleOutput = runRules(ALL_RULES, state, config).filter((f) => enabledRuleIds.has(f.ruleId));
 
   await persistFindings(teamId, ruleOutput);
 
