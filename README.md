@@ -19,7 +19,7 @@ Detects **drift** between what your Jira board claims and what your GitHub repos
 | B7–B8 | Linking (explicit, branch, commit-ref) | done |
 | B9–B12 | Rule framework + D1, D2, D3 | done |
 | B13 | Brief narrator | done |
-| B14 | CLI runner | code done; GO/NO-GO gate needs a real team + lead review |
+| B14 | CLI runner | code done; **first real sync+drift run completed** (see below) — GO/NO-GO gate still needs your usefulness judgment |
 | B27 | Query service (Fastify API: /api/today, /api/standup) | done |
 | B31 | Today screen (web) | done |
 | B32 | Standup screen (web) | done |
@@ -175,6 +175,47 @@ suppressed finding the rules still produce is no longer actually open. It now re
 the design spec's FR-7 example) — every suppression here is scoped to one exact `dedupe_key`,
 the finest grain. A management UI for reviewing/removing standing suppressions is B34 (Settings)
 territory, not built.
+
+### First live run against a real team (B14)
+
+Connected to a real Jira Cloud site and a real GitHub repo for the first time and ran
+`sync → drift → brief` end to end. This is real progress toward the B14 GO/NO-GO gate, but not
+the gate itself — that still needs your own judgment on whether the findings are useful, per
+`asof-product-plan.md` §11.
+
+**Three real bugs the live run surfaced, all fixed:**
+- **Atlassian removed `/rest/api/3/search`** (the endpoint `fetchIssues` used) in favor of
+  `/rest/api/3/search/jql`, which is cursor-paginated (`nextPageToken`/`isLast`) instead of
+  `startAt`/`total`. Migrated `src/connectors/jira.ts` accordingly.
+- **`fetchActiveSprint` threw on Kanban boards.** Team-managed Jira projects default to Kanban,
+  which has no sprints — Jira's API 400s with "The board does not support sprints" rather than
+  returning an empty list. Now caught and treated as `sprint = null`, a legitimate case (D7/D8
+  simply have nothing to evaluate on a Kanban team, same as they would on a quiet Scrum sprint).
+- **The brief prompt leaked a literal placeholder.** The STRUCTURE section's example subhead,
+  `"Sprint day X of Y · Z of T points remaining"`, had no fallback instruction for when
+  `sprint` is `null` — the local model echoed the placeholder text verbatim instead of omitting
+  it. Fixed with an explicit null-sprint instruction in `src/llm/brief.ts`.
+
+**One real data-quality gap, not a bug:** issues seeded via Jira's CSV importer (rather than
+moved through the UI/API) have no changelog entry for their current status — Jira never recorded
+a transition into it. D1 and D2 both key off `issue.lastTransitionAt`, so CSV-imported issues
+sitting in Done or In Progress are invisible to those rules until a real transition happens.
+Confirmed by transitioning issues via the Jira API directly (`KAN-15` → In Progress, `KAN-16` →
+Done) alongside a real unmerged PR — D1 and D2 both fired correctly once real transition history
+existed.
+
+**Verified findings, all against real data:** D1 fired on an issue moved straight to Done via
+the API while its linked PR (opened via the GitHub API, referencing the issue key in the branch
+name) stayed unmerged. D2 fired on three issues left untouched in In Progress past the threshold
+— including two transitions made independently by a second real team member, not by any test
+script, which is exactly the kind of organic signal the gate is waiting to be judged on.
+
+**Residual, documented, not chased further:** the local Ollama narrator still sometimes gets the
+finding *count* in the subhead wrong (e.g. reported 5 when there were 4) even after an explicit
+"count them, don't estimate" instruction — same category of local-model unreliability already
+noted in the Jarvis caveats below. Not pursued further since Ollama is the dev/demo fallback,
+not the production path (`ANTHROPIC_API_KEY` is); the entity-hallucination guard (invariant #2),
+which is the invariant that actually matters, was never violated.
 
 ## Design invariants
 
